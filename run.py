@@ -64,6 +64,9 @@ st.markdown("""
         color: #2196F3;
         font-size: 0.9rem;
     }
+    .stDataFrame {
+        font-size: 0.9rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -699,6 +702,19 @@ def get_kline_data(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
     df = rs.get_data()
     return df
 
+@st.cache_data(ttl=3600)
+def get_stock_name(symbol: str) -> str:
+    """获取股票名称"""
+    try:
+        rs = bs.query_stock_basic(code=symbol)
+        if rs.error_code == '0':
+            stock_info = rs.get_data()
+            if not stock_info.empty:
+                return stock_info.iloc[0]['code_name']
+    except:
+        pass
+    return symbol
+
 # ============================================================================
 # 图表绘制函数
 # ============================================================================
@@ -717,10 +733,10 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
     fig.add_trace(
         go.Candlestick(
             x=df['date'],
-            open=df['open'],
-            high=df['high'],
-            low=df['low'],
-            close=df['close'],
+            open=pd.to_numeric(df['open']),
+            high=pd.to_numeric(df['high']),
+            low=pd.to_numeric(df['low']),
+            close=pd.to_numeric(df['close']),
             name='K线'
         ),
         row=1, col=1
@@ -732,7 +748,7 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
             fig.add_trace(
                 go.Scatter(
                     x=df['date'],
-                    y=df[f'ma{period}'],
+                    y=pd.to_numeric(df[f'ma{period}']),
                     name=f'MA{period}',
                     line=dict(width=1)
                 ),
@@ -740,12 +756,12 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
             )
     
     # 成交量图
-    colors = ['red' if close >= open else 'green' 
+    colors = ['red' if float(close) >= float(open) else 'green' 
               for close, open in zip(df['close'], df['open'])]
     fig.add_trace(
         go.Bar(
             x=df['date'],
-            y=df['volume'],
+            y=pd.to_numeric(df['volume']),
             name='成交量',
             marker_color=colors
         ),
@@ -757,7 +773,7 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
         fig.add_trace(
             go.Scatter(
                 x=df['date'],
-                y=df['rsi'],
+                y=pd.to_numeric(df['rsi']),
                 name='RSI',
                 line=dict(color='purple', width=1)
             ),
@@ -776,9 +792,61 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
         showlegend=True
     )
     
-    fig.update_xatches(rangeslider_visible=False)
+    fig.update_xaxes(rangeslider_visible=False)
     
     return fig
+
+def plot_radar_chart(scores: Dict):
+    """绘制雷达图"""
+    categories = ['技术面', '量能', '动量', '波动率']
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatterpolar(
+        r=[scores['技术分'], scores['量能分'], scores['动量分'], scores['波动分']],
+        theta=categories,
+        fill='toself',
+        name='因子评分',
+        line_color='#1E88E5'
+    ))
+    
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 1]
+            )),
+        showlegend=False,
+        title="多因子评分雷达图",
+        height=400
+    )
+    
+    return fig
+
+# ============================================================================
+# 表格样式函数
+# ============================================================================
+
+def highlight_scores(val):
+    """高亮分数"""
+    if isinstance(val, (int, float)):
+        if val >= 0.8:
+            return 'background-color: #4CAF50; color: white'
+        elif val >= 0.6:
+            return 'background-color: #2196F3; color: white'
+        elif val >= 0.4:
+            return 'background-color: #FF9800; color: white'
+        elif val < 0.4:
+            return 'background-color: #F44336; color: white'
+    return ''
+
+def highlight_signals(val):
+    """高亮信号"""
+    if 'buy' in str(val):
+        return 'color: #4CAF50; font-weight: bold'
+    elif 'sell' in str(val):
+        return 'color: #F44336; font-weight: bold'
+    return ''
 
 # ============================================================================
 # 主程序
@@ -843,8 +911,22 @@ def main():
             query_date = selected_date.strftime('%Y-%m-%d')
             stock_df = get_stock_list(query_date)
         
+        if stock_df.empty:
+            st.warning(f"日期 {query_date} 无交易数据，尝试获取最近交易日数据...")
+            # 尝试获取前一天的日期
+            for days_back in range(1, 10):
+                query_date = (selected_date - timedelta(days=days_back)).strftime('%Y-%m-%d')
+                stock_df = get_stock_list(query_date)
+                if not stock_df.empty:
+                    st.info(f"使用 {query_date} 的数据")
+                    break
+        
+        if stock_df.empty:
+            st.error("无法获取股票列表")
+            return
+        
         # 过滤股票
-        a_stocks = stock_df[stock_df['code'].str.contains('sh.6|sz.0|sz.3')]
+        a_stocks = stock_df[stock_df['code'].str.contains('sh.6|sz.0|sz.3', na=False)]
         if test_mode:
             a_stocks = a_stocks.head(max_stocks)
         
@@ -883,7 +965,7 @@ def main():
         selected_stocks = []
         
         with st.spinner('正在执行高级选股分析...'):
-            for symbol, df in tqdm(kline_data.items()):
+            for symbol, df in kline_data.items():
                 result = advanced_stock_selection(symbol, df)
                 if result:
                     selected_stocks.append(result)
@@ -916,27 +998,11 @@ def main():
                 '综合分', '技术分', '量能分', '风报比', '趋势'
             ]].copy()
             
-            # 添加颜色样式
-            def color_score(val):
-                if val >= 0.8:
-                    return 'background-color: #4CAF50; color: white'
-                elif val >= 0.6:
-                    return 'background-color: #2196F3; color: white'
-                elif val >= 0.4:
-                    return 'background-color: #FF9800; color: white'
-                else:
-                    return 'background-color: #F44336; color: white'
+            # 应用样式
+            styled_df = df_display.style.applymap(highlight_scores, subset=['综合分', '技术分', '量能分'])
+            styled_df = styled_df.applymap(highlight_signals, subset=['信号类型'])
             
-            def color_signal(val):
-                if 'buy' in str(val):
-                    return 'color: #4CAF50; font-weight: bold'
-                elif 'sell' in str(val):
-                    return 'color: #F44336; font-weight: bold'
-                return ''
-            
-            styled_df = df_display.style.applymap(color_score, subset=['综合分'])
-            styled_df = styled_df.applymap(color_signal, subset=['信号类型'])
-            
+            # 显示表格
             st.dataframe(
                 styled_df,
                 use_container_width=True,
@@ -974,25 +1040,8 @@ def main():
                         st.markdown(f"**综合分**: {stock_info['综合分']}")
                     
                     # 雷达图
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatterpolar(
-                        r=[stock_info['技术分'], stock_info['量能分'], 
-                           stock_info['动量分'], stock_info['波动分']],
-                        theta=['技术面', '量能', '动量', '波动率'],
-                        fill='toself',
-                        name='因子评分'
-                    ))
-                    fig.update_layout(
-                        polar=dict(
-                            radialaxis=dict(
-                                visible=True,
-                                range=[0, 1]
-                            )),
-                        showlegend=False,
-                        title="多因子评分雷达图",
-                        height=400
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                    fig_radar = plot_radar_chart(stock_info)
+                    st.plotly_chart(fig_radar, use_container_width=True)
                     
                     # K线图
                     if code in kline_data:
