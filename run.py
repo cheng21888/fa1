@@ -23,6 +23,30 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ============================================================================
+# 强制禁用Altair - 防止Streamlit内部导入
+# ============================================================================
+import sys
+import types
+
+# 创建一个假的altair模块
+class MockAltair:
+    def __getattr__(self, name):
+        return None
+
+# 创建假的vegalite模块
+class MockVegaLite:
+    v4 = MockAltair()
+
+# 创建假的vega模块
+class MockVega:
+    vegalite = MockVegaLite()
+
+# 注入假的模块
+sys.modules['altair'] = MockAltair()
+sys.modules['altair.vegalite'] = MockVega()
+sys.modules['altair.vegalite.v4'] = MockAltair()
+
+# ============================================================================
 # 页面配置
 # ============================================================================
 st.set_page_config(
@@ -66,34 +90,6 @@ st.markdown("""
     }
     .stDataFrame {
         font-size: 0.9rem;
-    }
-    /* 表格样式 */
-    .dataframe {
-        font-size: 0.9rem;
-    }
-    .score-high {
-        background-color: #4CAF50;
-        color: white;
-        padding: 2px 5px;
-        border-radius: 3px;
-    }
-    .score-medium {
-        background-color: #2196F3;
-        color: white;
-        padding: 2px 5px;
-        border-radius: 3px;
-    }
-    .score-low {
-        background-color: #FF9800;
-        color: white;
-        padding: 2px 5px;
-        border-radius: 3px;
-    }
-    .score-danger {
-        background-color: #F44336;
-        color: white;
-        padding: 2px 5px;
-        border-radius: 3px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -846,7 +842,7 @@ def plot_radar_chart(scores: Dict):
     return fig
 
 # ============================================================================
-# 表格显示函数（不使用style，避免Altair）
+# 表格显示函数
 # ============================================================================
 
 def display_results_table(df_results):
@@ -865,34 +861,7 @@ def display_results_table(df_results):
     st.dataframe(
         df_display,
         use_container_width=True,
-        height=400,
-        column_config={
-            "综合分": st.column_config.ProgressColumn(
-                "综合分",
-                help="综合评分",
-                format="%.3f",
-                min_value=0,
-                max_value=1,
-            ),
-            "技术分": st.column_config.ProgressColumn(
-                "技术分",
-                help="技术面评分",
-                format="%.3f",
-                min_value=0,
-                max_value=1,
-            ),
-            "量能分": st.column_config.ProgressColumn(
-                "量能分",
-                help="量能评分",
-                format="%.3f",
-                min_value=0,
-                max_value=1,
-            ),
-            "信号类型": st.column_config.TextColumn(
-                "信号类型",
-                help="买卖信号"
-            ),
-        }
+        height=400
     )
 
 # ============================================================================
