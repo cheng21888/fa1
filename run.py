@@ -67,6 +67,34 @@ st.markdown("""
     .stDataFrame {
         font-size: 0.9rem;
     }
+    /* 表格样式 */
+    .dataframe {
+        font-size: 0.9rem;
+    }
+    .score-high {
+        background-color: #4CAF50;
+        color: white;
+        padding: 2px 5px;
+        border-radius: 3px;
+    }
+    .score-medium {
+        background-color: #2196F3;
+        color: white;
+        padding: 2px 5px;
+        border-radius: 3px;
+    }
+    .score-low {
+        background-color: #FF9800;
+        color: white;
+        padding: 2px 5px;
+        border-radius: 3px;
+    }
+    .score-danger {
+        background-color: #F44336;
+        color: white;
+        padding: 2px 5px;
+        border-radius: 3px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -702,19 +730,6 @@ def get_kline_data(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
     df = rs.get_data()
     return df
 
-@st.cache_data(ttl=3600)
-def get_stock_name(symbol: str) -> str:
-    """获取股票名称"""
-    try:
-        rs = bs.query_stock_basic(code=symbol)
-        if rs.error_code == '0':
-            stock_info = rs.get_data()
-            if not stock_info.empty:
-                return stock_info.iloc[0]['code_name']
-    except:
-        pass
-    return symbol
-
 # ============================================================================
 # 图表绘制函数
 # ============================================================================
@@ -729,14 +744,19 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
         subplot_titles=(f'{symbol} - {stock_info.get("名称", "")} K线图', '成交量', 'RSI')
     )
     
+    # 转换数据类型
+    df_plot = df.copy()
+    for col in ['open', 'high', 'low', 'close', 'volume']:
+        df_plot[col] = pd.to_numeric(df_plot[col], errors='coerce')
+    
     # K线图
     fig.add_trace(
         go.Candlestick(
-            x=df['date'],
-            open=pd.to_numeric(df['open']),
-            high=pd.to_numeric(df['high']),
-            low=pd.to_numeric(df['low']),
-            close=pd.to_numeric(df['close']),
+            x=df_plot['date'],
+            open=df_plot['open'],
+            high=df_plot['high'],
+            low=df_plot['low'],
+            close=df_plot['close'],
             name='K线'
         ),
         row=1, col=1
@@ -744,11 +764,12 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
     
     # 添加均线
     for period in [5, 10, 20]:
-        if f'ma{period}' in df.columns:
+        if f'ma{period}' in df_plot.columns:
+            df_plot[f'ma{period}'] = pd.to_numeric(df_plot[f'ma{period}'], errors='coerce')
             fig.add_trace(
                 go.Scatter(
-                    x=df['date'],
-                    y=pd.to_numeric(df[f'ma{period}']),
+                    x=df_plot['date'],
+                    y=df_plot[f'ma{period}'],
                     name=f'MA{period}',
                     line=dict(width=1)
                 ),
@@ -756,12 +777,12 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
             )
     
     # 成交量图
-    colors = ['red' if float(close) >= float(open) else 'green' 
-              for close, open in zip(df['close'], df['open'])]
+    colors = ['red' if close >= open else 'green' 
+              for close, open in zip(df_plot['close'], df_plot['open'])]
     fig.add_trace(
         go.Bar(
-            x=df['date'],
-            y=pd.to_numeric(df['volume']),
+            x=df_plot['date'],
+            y=df_plot['volume'],
             name='成交量',
             marker_color=colors
         ),
@@ -769,11 +790,12 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
     )
     
     # RSI
-    if 'rsi' in df.columns:
+    if 'rsi' in df_plot.columns:
+        df_plot['rsi'] = pd.to_numeric(df_plot['rsi'], errors='coerce')
         fig.add_trace(
             go.Scatter(
-                x=df['date'],
-                y=pd.to_numeric(df['rsi']),
+                x=df_plot['date'],
+                y=df_plot['rsi'],
                 name='RSI',
                 line=dict(color='purple', width=1)
             ),
@@ -824,29 +846,54 @@ def plot_radar_chart(scores: Dict):
     return fig
 
 # ============================================================================
-# 表格样式函数
+# 表格显示函数（不使用style，避免Altair）
 # ============================================================================
 
-def highlight_scores(val):
-    """高亮分数"""
-    if isinstance(val, (int, float)):
-        if val >= 0.8:
-            return 'background-color: #4CAF50; color: white'
-        elif val >= 0.6:
-            return 'background-color: #2196F3; color: white'
-        elif val >= 0.4:
-            return 'background-color: #FF9800; color: white'
-        elif val < 0.4:
-            return 'background-color: #F44336; color: white'
-    return ''
-
-def highlight_signals(val):
-    """高亮信号"""
-    if 'buy' in str(val):
-        return 'color: #4CAF50; font-weight: bold'
-    elif 'sell' in str(val):
-        return 'color: #F44336; font-weight: bold'
-    return ''
+def display_results_table(df_results):
+    """显示结果表格"""
+    # 选择要显示的列
+    display_cols = ['代码', '名称', '现价', '止损', '目标', '信号类型', '综合分', '技术分', '量能分', '风报比', '趋势']
+    df_display = df_results[display_cols].copy()
+    
+    # 格式化数值
+    for col in ['综合分', '技术分', '量能分']:
+        df_display[col] = df_display[col].apply(lambda x: f"{x:.3f}")
+    
+    df_display['风报比'] = df_display['风报比'].apply(lambda x: f"1:{x:.2f}")
+    
+    # 使用st.dataframe直接显示
+    st.dataframe(
+        df_display,
+        use_container_width=True,
+        height=400,
+        column_config={
+            "综合分": st.column_config.ProgressColumn(
+                "综合分",
+                help="综合评分",
+                format="%.3f",
+                min_value=0,
+                max_value=1,
+            ),
+            "技术分": st.column_config.ProgressColumn(
+                "技术分",
+                help="技术面评分",
+                format="%.3f",
+                min_value=0,
+                max_value=1,
+            ),
+            "量能分": st.column_config.ProgressColumn(
+                "量能分",
+                help="量能评分",
+                format="%.3f",
+                min_value=0,
+                max_value=1,
+            ),
+            "信号类型": st.column_config.TextColumn(
+                "信号类型",
+                help="买卖信号"
+            ),
+        }
+    )
 
 # ============================================================================
 # 主程序
@@ -991,23 +1038,7 @@ def main():
         # 显示结果表格
         if selected_stocks:
             df_results = pd.DataFrame(selected_stocks)
-            
-            # 格式化显示
-            df_display = df_results[[
-                '代码', '名称', '现价', '止损', '目标', '信号类型', 
-                '综合分', '技术分', '量能分', '风报比', '趋势'
-            ]].copy()
-            
-            # 应用样式
-            styled_df = df_display.style.applymap(highlight_scores, subset=['综合分', '技术分', '量能分'])
-            styled_df = styled_df.applymap(highlight_signals, subset=['信号类型'])
-            
-            # 显示表格
-            st.dataframe(
-                styled_df,
-                use_container_width=True,
-                height=400
-            )
+            display_results_table(df_results)
             
             # 详细图表
             if show_charts and len(selected_stocks) > 0:
