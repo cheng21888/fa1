@@ -1,71 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-CChanTrader-AI 高级版本 - Streamlit版
+CChanTrader-AI Streamlit选股表格版
+- 支持日期选择
+- 只显示选股结果表格
 - 精准缠论算法升级
 - 多因子融合系统
-- 实盘验证测试框架
 """
 
-import os
-import json
+import streamlit as st
 import pandas as pd
 import numpy as np
-import streamlit as st
 import baostock as bs
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
-from dataclasses import dataclass
-from typing import List, Dict, Optional, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
-# ============================================================================
-# 页面配置
-# ============================================================================
+# 设置页面配置
 st.set_page_config(
-    page_title="CChanTrader-AI 高级版",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="CChanTrader-AI 选股系统",
+    page_icon="📊",
+    layout="wide"
 )
-
-# 自定义CSS
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        color: #1E88E5;
-        text-align: center;
-        margin-bottom: 1rem;
-    }
-    .sub-header {
-        font-size: 1.5rem;
-        color: #424242;
-        margin-bottom: 1rem;
-    }
-    .metric-card {
-        background-color: #f0f2f6;
-        border-radius: 10px;
-        padding: 1rem;
-        text-align: center;
-    }
-    .signal-buy {
-        color: #4CAF50;
-        font-weight: bold;
-    }
-    .signal-sell {
-        color: #F44336;
-        font-weight: bold;
-    }
-    .info-text {
-        color: #2196F3;
-        font-size: 0.9rem;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 # ============================================================================
 # 高级参数配置
@@ -114,47 +70,6 @@ ADVANCED_PARAMS = {
         "take_profit_ratio": 3,     # 止盈比例(风报比)
     }
 }
-
-# ============================================================================
-# 高级数据结构
-# ============================================================================
-
-@dataclass
-class AdvancedSegment:
-    """高级线段结构"""
-    start_idx: int
-    end_idx: int
-    direction: str          # 'up' | 'down'
-    start_price: float
-    end_price: float
-    high: float
-    low: float
-    strength: float         # 线段强度
-    volume_profile: float   # 成交量分布
-    duration: int           # 持续时间
-
-@dataclass
-class AdvancedPivot:
-    """高级中枢结构"""
-    start_idx: int
-    end_idx: int
-    high: float
-    low: float
-    center: float
-    strength: float         # 中枢强度
-    volume_density: float   # 成交量密度
-    breakout_probability: float  # 突破概率
-    direction_bias: str     # 方向偏向
-
-@dataclass
-class MultiFactorScore:
-    """多因子评分"""
-    technical_score: float      # 技术面评分
-    volume_score: float         # 量能评分
-    momentum_score: float       # 动量评分
-    volatility_score: float     # 波动率评分
-    total_score: float          # 综合评分
-    risk_score: float           # 风险评分
 
 # ============================================================================
 # 高级缠论算法实现
@@ -219,7 +134,7 @@ class AdvancedChanAnalyzer:
         
         return df
     
-    def identify_fractal_points(self) -> Tuple[List[int], List[int]]:
+    def identify_fractal_points(self):
         """识别分型点（高点和低点）"""
         highs, lows = [], []
         
@@ -240,16 +155,18 @@ class AdvancedChanAnalyzer:
         
         return highs, lows
     
-    def identify_segments(self) -> List[AdvancedSegment]:
+    def identify_segments(self):
         """识别线段"""
         highs, lows = self.identify_fractal_points()
         
+        # 合并所有极值点
         all_points = []
         for h in highs:
             all_points.append((h, self.df['high'].iloc[h], 'high'))
         for l in lows:
             all_points.append((l, self.df['low'].iloc[l], 'low'))
         
+        # 按时间排序
         all_points.sort(key=lambda x: x[0])
         
         segments = []
@@ -257,35 +174,42 @@ class AdvancedChanAnalyzer:
             start_idx, start_price, start_type = all_points[i]
             end_idx, end_price, end_type = all_points[i + 1]
             
+            # 高低点交替才能形成线段
             if start_type != end_type:
                 direction = 'up' if start_type == 'low' else 'down'
                 
+                # 计算线段区间的高低点
                 segment_data = self.df.iloc[start_idx:end_idx+1]
                 high = segment_data['high'].max()
                 low = segment_data['low'].min()
                 
+                # 计算线段强度
                 strength = abs(end_price - start_price) / start_price
+                
+                # 计算成交量分布
                 volume_profile = segment_data['volume'].mean()
+                
+                # 线段长度（K线数）
                 duration = end_idx - start_idx + 1
                 
+                # 过滤太短的线段
                 if duration >= ADVANCED_PARAMS["chan"]["min_segment_bars"]:
-                    segment = AdvancedSegment(
-                        start_idx=start_idx,
-                        end_idx=end_idx,
-                        direction=direction,
-                        start_price=start_price,
-                        end_price=end_price,
-                        high=high,
-                        low=low,
-                        strength=strength,
-                        volume_profile=volume_profile,
-                        duration=duration
-                    )
-                    segments.append(segment)
+                    segments.append({
+                        'start_idx': start_idx,
+                        'end_idx': end_idx,
+                        'direction': direction,
+                        'start_price': start_price,
+                        'end_price': end_price,
+                        'high': high,
+                        'low': low,
+                        'strength': strength,
+                        'volume_profile': volume_profile,
+                        'duration': duration
+                    })
         
         return segments
     
-    def identify_pivots(self, segments: List[AdvancedSegment]) -> List[AdvancedPivot]:
+    def identify_pivots(self, segments):
         """识别中枢"""
         pivots = []
         
@@ -295,43 +219,51 @@ class AdvancedChanAnalyzer:
         for i in range(len(segments) - 2):
             seg1, seg2, seg3 = segments[i], segments[i+1], segments[i+2]
             
-            if (seg1.direction != seg2.direction and 
-                seg2.direction != seg3.direction and
-                seg1.direction == seg3.direction):
+            # 检查三段式中枢
+            if (seg1['direction'] != seg2['direction'] and 
+                seg2['direction'] != seg3['direction'] and
+                seg1['direction'] == seg3['direction']):
                 
-                if seg1.direction == 'up':
-                    pivot_high = min(seg1.end_price, seg3.end_price)
-                    pivot_low = seg2.end_price
-                else:
-                    pivot_high = seg2.end_price
-                    pivot_low = max(seg1.end_price, seg3.end_price)
+                # 计算中枢边界
+                if seg1['direction'] == 'up':  # 上-下-上型中枢
+                    pivot_high = min(seg1['end_price'], seg3['end_price'])
+                    pivot_low = seg2['end_price']
+                else:  # 下-上-下型中枢
+                    pivot_high = seg2['end_price']
+                    pivot_low = max(seg1['end_price'], seg3['end_price'])
                 
+                # 检查中枢有效性
                 if pivot_high > pivot_low:
                     center = (pivot_high + pivot_low) / 2
                     strength = (pivot_high - pivot_low) / center
                     
+                    # 过滤强度不足的中枢
                     if strength >= ADVANCED_PARAMS["chan"]["pivot_strength_min"]:
-                        pivot_data = self.df.iloc[seg1.start_idx:seg3.end_idx+1]
+                        # 计算成交量密度
+                        pivot_data = self.df.iloc[seg1['start_idx']:seg3['end_idx']+1]
                         volume_density = pivot_data['volume'].mean()
-                        breakout_prob = self._calculate_breakout_probability(pivot_data)
-                        direction_bias = 'up' if seg3.strength > seg1.strength else 'down'
                         
-                        pivot = AdvancedPivot(
-                            start_idx=seg1.start_idx,
-                            end_idx=seg3.end_idx,
-                            high=pivot_high,
-                            low=pivot_low,
-                            center=center,
-                            strength=strength,
-                            volume_density=volume_density,
-                            breakout_probability=breakout_prob,
-                            direction_bias=direction_bias
-                        )
-                        pivots.append(pivot)
+                        # 计算突破概率
+                        breakout_prob = self._calculate_breakout_probability(pivot_data)
+                        
+                        # 方向偏向
+                        direction_bias = 'up' if seg3['strength'] > seg1['strength'] else 'down'
+                        
+                        pivots.append({
+                            'start_idx': seg1['start_idx'],
+                            'end_idx': seg3['end_idx'],
+                            'high': pivot_high,
+                            'low': pivot_low,
+                            'center': center,
+                            'strength': strength,
+                            'volume_density': volume_density,
+                            'breakout_probability': breakout_prob,
+                            'direction_bias': direction_bias
+                        })
         
         return pivots
     
-    def _calculate_breakout_probability(self, pivot_data: pd.DataFrame) -> float:
+    def _calculate_breakout_probability(self, pivot_data):
         """计算突破概率"""
         try:
             vol_ratio = pivot_data['vol_ratio'].mean() if 'vol_ratio' in pivot_data.columns else 1.0
@@ -341,15 +273,22 @@ class AdvancedChanAnalyzer:
         except:
             return 0.5
     
-    def analyze(self) -> Dict:
+    def analyze(self):
         """完整分析"""
         if len(self.df) < 10:
             return self._empty_result()
         
+        # 识别线段和中枢
         self.segments = self.identify_segments()
         self.pivots = self.identify_pivots(self.segments)
+        
+        # 趋势判断
         trend = self._determine_trend()
+        
+        # 信号识别
         signals = self._identify_signals()
+        
+        # 量价分析
         volume_analysis = self._analyze_volume()
         
         return {
@@ -361,7 +300,7 @@ class AdvancedChanAnalyzer:
             'technical_data': self.df.iloc[-1].to_dict() if not self.df.empty else {}
         }
     
-    def _determine_trend(self) -> str:
+    def _determine_trend(self):
         """判断趋势"""
         if not self.segments:
             return 'side'
@@ -369,10 +308,11 @@ class AdvancedChanAnalyzer:
         recent_segments = self.segments[-3:] if len(self.segments) >= 3 else self.segments
         
         if len(recent_segments) >= 2:
-            last_high = max(seg.high for seg in recent_segments if seg.direction == 'up')
-            last_low = min(seg.low for seg in recent_segments if seg.direction == 'down')
+            last_high = max(seg['high'] for seg in recent_segments if seg['direction'] == 'up')
+            last_low = min(seg['low'] for seg in recent_segments if seg['direction'] == 'down')
             
             current_price = self.df['close'].iloc[-1]
+            
             ma5 = self.df['ma5'].iloc[-1] if 'ma5' in self.df.columns else current_price
             ma20 = self.df['ma20'].iloc[-1] if 'ma20' in self.df.columns else current_price
             
@@ -383,7 +323,7 @@ class AdvancedChanAnalyzer:
         
         return 'side'
     
-    def _identify_signals(self) -> Dict:
+    def _identify_signals(self):
         """识别买卖信号"""
         signals = {'1_buy': [], '2_buy': [], '3_buy': [], '1_sell': [], '2_sell': []}
         
@@ -392,26 +332,29 @@ class AdvancedChanAnalyzer:
         
         current_price = self.df['close'].iloc[-1]
         
+        # 检查最近的中枢
         for pivot in self.pivots[-2:]:
-            if current_price > pivot.high * (1 + ADVANCED_PARAMS["chan"]["breakout_threshold"]):
+            # 二买信号
+            if current_price > pivot['high'] * (1 + ADVANCED_PARAMS["chan"]["breakout_threshold"]):
                 signals['2_buy'].append({
                     'price': current_price,
-                    'pivot_center': pivot.center,
-                    'breakout_strength': (current_price - pivot.high) / pivot.high,
-                    'confidence': pivot.breakout_probability
+                    'pivot_center': pivot['center'],
+                    'breakout_strength': (current_price - pivot['high']) / pivot['high'],
+                    'confidence': pivot['breakout_probability']
                 })
             
-            elif pivot.low <= current_price <= pivot.high and pivot.direction_bias == 'up':
+            # 三买信号
+            elif pivot['low'] <= current_price <= pivot['high'] and pivot['direction_bias'] == 'up':
                 signals['3_buy'].append({
                     'price': current_price,
-                    'pivot_center': pivot.center,
-                    'support_strength': (current_price - pivot.low) / (pivot.high - pivot.low),
-                    'confidence': pivot.breakout_probability * 0.8
+                    'pivot_center': pivot['center'],
+                    'support_strength': (current_price - pivot['low']) / (pivot['high'] - pivot['low']),
+                    'confidence': pivot['breakout_probability'] * 0.8
                 })
         
         return signals
     
-    def _analyze_volume(self) -> Dict:
+    def _analyze_volume(self):
         """量价分析"""
         try:
             recent_data = self.df.iloc[-20:]
@@ -431,7 +374,8 @@ class AdvancedChanAnalyzer:
         except:
             return {'volume_trend': 'stable', 'price_volume_correlation': 0, 'current_volume_ratio': 1.0, 'volume_surge': False}
     
-    def _empty_result(self) -> Dict:
+    def _empty_result(self):
+        """空结果"""
         return {
             'segments': [],
             'pivots': [],
@@ -441,6 +385,7 @@ class AdvancedChanAnalyzer:
             'technical_data': {}
         }
 
+
 # ============================================================================
 # 多因子融合系统
 # ============================================================================
@@ -448,7 +393,7 @@ class AdvancedChanAnalyzer:
 class MultiFactorAnalyzer:
     """多因子分析器"""
     
-    def __init__(self, df: pd.DataFrame, chan_result: Dict):
+    def __init__(self, df: pd.DataFrame, chan_result: dict):
         self.df = df
         self.chan_result = chan_result
         
@@ -509,11 +454,18 @@ class MultiFactorAnalyzer:
         try:
             vol_analysis = self.chan_result['volume_analysis']
             
+            # 成交量趋势得分
             trend_score = 1.0 if vol_analysis['volume_trend'] == 'increasing' else 0.3
+            
+            # 量价配合得分
             correlation = vol_analysis['price_volume_correlation']
             corr_score = max(0, correlation) if correlation > 0 else 0
+            
+            # 成交量放大得分
             vol_ratio = vol_analysis['current_volume_ratio']
             ratio_score = min(1.0, vol_ratio / 2.0) if vol_ratio > 1 else 0.2
+            
+            # 突然放量得分
             surge_score = 0.8 if vol_analysis['volume_surge'] else 0.4
             
             score = trend_score * 0.3 + corr_score * 0.3 + ratio_score * 0.2 + surge_score * 0.2
@@ -567,7 +519,7 @@ class MultiFactorAnalyzer:
             
         return score
     
-    def calculate_multi_factor_score(self) -> MultiFactorScore:
+    def calculate_multi_factor_score(self):
         """计算多因子综合评分"""
         technical_score = self.calculate_technical_score()
         volume_score = self.calculate_volume_score()
@@ -584,461 +536,331 @@ class MultiFactorAnalyzer:
         
         risk_score = volatility_score
         
-        return MultiFactorScore(
-            technical_score=round(technical_score, 3),
-            volume_score=round(volume_score, 3),
-            momentum_score=round(momentum_score, 3),
-            volatility_score=round(volatility_score, 3),
-            total_score=round(total_score, 3),
-            risk_score=round(risk_score, 3)
-        )
+        return {
+            'technical_score': round(technical_score, 3),
+            'volume_score': round(volume_score, 3),
+            'momentum_score': round(momentum_score, 3),
+            'volatility_score': round(volatility_score, 3),
+            'total_score': round(total_score, 3),
+            'risk_score': round(risk_score, 3)
+        }
+
 
 # ============================================================================
 # 高级选股函数
 # ============================================================================
 
-def advanced_stock_selection(symbol: str, df: pd.DataFrame) -> Optional[Dict]:
+def advanced_stock_selection(symbol: str, df: pd.DataFrame) -> dict:
     """高级选股函数"""
     try:
+        # 数据质量检查
         if len(df) < 60 or df['volume'].sum() == 0:
             return None
         
+        # 价格范围过滤
         current_price = float(df['close'].iloc[-1])
         price_range = ADVANCED_PARAMS["selection"]["price_range"]
         if not (price_range[0] <= current_price <= price_range[1]):
             return None
         
+        # 流动性过滤
         avg_amount = df['amount'].iloc[-20:].mean() if 'amount' in df.columns else 0
         if avg_amount < ADVANCED_PARAMS["selection"]["min_liquidity"]:
             return None
         
+        # 缠论分析
         chan_analyzer = AdvancedChanAnalyzer(df)
         chan_result = chan_analyzer.analyze()
         
+        # 多因子分析
         multi_factor = MultiFactorAnalyzer(df, chan_result)
         factor_score = multi_factor.calculate_multi_factor_score()
         
-        if factor_score.total_score < ADVANCED_PARAMS["selection"]["min_score"]:
+        # 综合评分过滤
+        if factor_score['total_score'] < ADVANCED_PARAMS["selection"]["min_score"]:
             return None
         
-        if factor_score.volatility_score < (1 - ADVANCED_PARAMS["selection"]["max_volatility"]):
+        # 波动率过滤
+        if factor_score['volatility_score'] < (1 - ADVANCED_PARAMS["selection"]["max_volatility"]):
             return None
         
+        # 信号确认
         has_buy_signal = bool(chan_result['signals']['2_buy'] or chan_result['signals']['3_buy'])
         if not has_buy_signal:
             return None
         
+        # 计算入场点和止损点
         entry_price = current_price
-        stop_loss = entry_price * (1 - ADVANCED_PARAMS["risk"]["stop_loss_pct"])
         
+        # 基于中枢计算止损
+        stop_loss = entry_price * (1 - ADVANCED_PARAMS["risk"]["stop_loss_pct"])
         if chan_result['pivots']:
             latest_pivot = chan_result['pivots'][-1]
-            pivot_stop = latest_pivot.low * 0.98
+            pivot_stop = latest_pivot['low'] * 0.98
             stop_loss = max(stop_loss, pivot_stop)
         
+        # 目标价位
         risk_amount = entry_price - stop_loss
         take_profit = entry_price + risk_amount * ADVANCED_PARAMS["risk"]["take_profit_ratio"]
         
+        # 信号类型
         signal_type = '2_buy' if chan_result['signals']['2_buy'] else '3_buy'
         
-        # 获取股票名称
-        stock_name = symbol
-        try:
-            rs = bs.query_stock_basic(code=symbol)
-            if rs.error_code == '0':
-                stock_info = rs.get_data()
-                if not stock_info.empty:
-                    stock_name = stock_info.iloc[0]['code_name']
-        except:
-            pass
+        # 股票名称映射
+        stock_names = {
+            'sh.600000': '浦发银行', 'sh.600036': '招商银行', 'sh.600519': '贵州茅台',
+            'sz.000001': '平安银行', 'sz.000858': '五粮液', 'sz.300750': '宁德时代',
+            # 可以继续添加更多股票名称映射
+        }
+        stock_name = stock_names.get(symbol, symbol.split('.')[-1])
         
         return {
-            '代码': symbol,
-            '名称': stock_name,
-            '现价': round(entry_price, 2),
-            '止损': round(stop_loss, 2),
-            '目标': round(take_profit, 2),
+            '股票代码': symbol,
+            '股票名称': stock_name,
+            '最新价': round(entry_price, 2),
             '信号类型': signal_type,
-            '技术分': factor_score.technical_score,
-            '量能分': factor_score.volume_score,
-            '动量分': factor_score.momentum_score,
-            '波动分': factor_score.volatility_score,
-            '综合分': factor_score.total_score,
-            '风险分': factor_score.risk_score,
+            '综合评分': factor_score['total_score'],
+            '技术面': factor_score['technical_score'],
+            '量能': factor_score['volume_score'],
+            '动量': factor_score['momentum_score'],
+            '波动率': factor_score['volatility_score'],
             '趋势': chan_result['trend'],
             '线段数': len(chan_result['segments']),
             '中枢数': len(chan_result['pivots']),
+            '止损价': round(stop_loss, 2),
+            '目标价': round(take_profit, 2),
             '风报比': round((take_profit - entry_price) / (entry_price - stop_loss), 2)
         }
         
     except Exception as e:
-        st.error(f"高级选股分析 {symbol} 错误: {e}")
+        print(f"高级选股分析 {symbol} 错误: {e}")
         return None
 
-# ============================================================================
-# 数据获取函数
-# ============================================================================
-
-@st.cache_data(ttl=3600)
-def get_stock_list(date: str) -> pd.DataFrame:
-    """获取股票列表"""
-    stock_rs = bs.query_all_stock(date)
-    stock_df = stock_rs.get_data()
-    return stock_df
-
-@st.cache_data(ttl=3600)
-def get_kline_data(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """获取K线数据"""
-    rs = bs.query_history_k_data_plus(
-        symbol,
-        'date,code,open,high,low,close,volume,amount',
-        start_date=start_date, 
-        end_date=end_date, 
-        frequency='d'
-    )
-    df = rs.get_data()
-    return df
 
 # ============================================================================
-# 图表绘制函数
-# ============================================================================
-
-def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
-    """绘制股票K线图"""
-    fig = make_subplots(
-        rows=3, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.05,
-        row_heights=[0.6, 0.2, 0.2],
-        subplot_titles=(f'{symbol} - {stock_info.get("名称", "")} K线图', '成交量', 'RSI')
-    )
-    
-    # K线图
-    fig.add_trace(
-        go.Candlestick(
-            x=df['date'],
-            open=df['open'],
-            high=df['high'],
-            low=df['low'],
-            close=df['close'],
-            name='K线'
-        ),
-        row=1, col=1
-    )
-    
-    # 添加均线
-    for period in [5, 10, 20]:
-        if f'ma{period}' in df.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=df['date'],
-                    y=df[f'ma{period}'],
-                    name=f'MA{period}',
-                    line=dict(width=1)
-                ),
-                row=1, col=1
-            )
-    
-    # 成交量图
-    colors = ['red' if close >= open else 'green' 
-              for close, open in zip(df['close'], df['open'])]
-    fig.add_trace(
-        go.Bar(
-            x=df['date'],
-            y=df['volume'],
-            name='成交量',
-            marker_color=colors
-        ),
-        row=2, col=1
-    )
-    
-    # RSI
-    if 'rsi' in df.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=df['date'],
-                y=df['rsi'],
-                name='RSI',
-                line=dict(color='purple', width=1)
-            ),
-            row=3, col=1
-        )
-        # 添加RSI参考线
-        fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1)
-        fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
-    
-    fig.update_layout(
-        title=f'{symbol} 技术分析图表',
-        xaxis_title='日期',
-        yaxis_title='价格',
-        template='plotly_dark',
-        height=800,
-        showlegend=True
-    )
-    
-    fig.update_xatches(rangeslider_visible=False)
-    
-    return fig
-
-# ============================================================================
-# 主程序
+# Streamlit主程序
 # ============================================================================
 
 def main():
-    """主函数"""
-    # 侧边栏
+    """Streamlit主程序"""
+    st.title("📊 CChanTrader-AI 智能选股系统")
+    st.markdown("---")
+    
+    # 侧边栏配置
     with st.sidebar:
-        st.image("https://img.icons8.com/color/96/000000/stocks.png", width=80)
-        st.title("CChanTrader-AI")
-        st.markdown("---")
+        st.header("⚙️ 选股配置")
         
         # 日期选择
-        st.subheader("📅 日期选择")
-        today = datetime.now()
-        selected_date = st.date_input(
-            "分析日期",
-            value=today,
-            max_value=today
+        analysis_date = st.date_input(
+            "选择分析日期",
+            value=datetime.now(),
+            max_value=datetime.now()
         )
         
-        # 参数设置
-        st.subheader("⚙️ 分析参数")
-        test_mode = st.checkbox("测试模式", value=True)
-        max_stocks = st.slider("最大分析股票数", 10, 200, 50, step=10)
+        st.markdown("---")
         
-        min_score = st.slider("最低综合分", 0.0, 1.0, 0.6, 0.05)
-        ADVANCED_PARAMS["selection"]["min_score"] = min_score
+        # 选股参数
+        st.subheader("选股参数")
+        min_score = st.slider(
+            "最低综合评分",
+            min_value=0.3,
+            max_value=0.9,
+            value=0.6,
+            step=0.05
+        )
         
-        min_price = st.number_input("最低价格", 1, 100, 3)
-        max_price = st.number_input("最高价格", 10, 1000, 300)
-        ADVANCED_PARAMS["selection"]["price_range"] = [min_price, max_price]
+        max_stocks = st.slider(
+            "最大分析股票数",
+            min_value=10,
+            max_value=200,
+            value=50,
+            step=10
+        )
+        
+        include_3buy = st.checkbox("包含三买信号", value=True)
+        include_2buy = st.checkbox("包含二买信号", value=True)
         
         st.markdown("---")
-        st.markdown("### 📊 高级功能")
         
-        show_charts = st.checkbox("显示详细图表", value=True)
-        show_backtest = st.checkbox("显示回测示例", value=False)
+        # 执行按钮
+        analyze_button = st.button("🚀 开始选股", type="primary", use_container_width=True)
         
-        if st.button("🔄 刷新数据", type="primary"):
-            st.cache_data.clear()
+        if st.button("🔄 重置参数", use_container_width=True):
             st.rerun()
     
     # 主界面
-    st.markdown('<h1 class="main-header">CChanTrader-AI 高级版本</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="text-align: center;">精准缠论算法 + 多因子融合 + 实盘验证</p>', unsafe_allow_html=True)
-    
-    # 登录BaoStock
-    with st.spinner('正在连接BaoStock...'):
-        lg = bs.login()
-    
-    if lg.error_code != '0':
-        st.error(f"BaoStock连接失败: {lg.error_msg}")
-        return
-    
-    try:
-        # 获取股票列表
-        st.info(f"📊 分析日期: {selected_date.strftime('%Y-%m-%d')}")
-        
-        with st.spinner('正在获取股票列表...'):
-            query_date = selected_date.strftime('%Y-%m-%d')
-            stock_df = get_stock_list(query_date)
-        
-        # 过滤股票
-        a_stocks = stock_df[stock_df['code'].str.contains('sh.6|sz.0|sz.3')]
-        if test_mode:
-            a_stocks = a_stocks.head(max_stocks)
-        
-        st.success(f"📋 待分析股票: {len(a_stocks)}只")
-        
-        # 进度条
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        # 获取K线数据
-        kline_data = {}
-        end_date = selected_date.strftime('%Y-%m-%d')
-        start_date = (selected_date - timedelta(days=200)).strftime('%Y-%m-%d')
-        
-        for idx, (_, stock) in enumerate(a_stocks.iterrows()):
-            code = stock['code']
-            status_text.text(f'正在获取 {code} 的数据... ({idx+1}/{len(a_stocks)})')
+    if analyze_button:
+        with st.spinner("正在进行智能选股分析..."):
+            # 更新选股阈值
+            ADVANCED_PARAMS["selection"]["min_score"] = min_score
+            
+            # 连接BaoStock
+            lg = bs.login()
+            if lg.error_code != '0':
+                st.error(f"BaoStock连接失败: {lg.error_msg}")
+                return
             
             try:
-                day_df = get_kline_data(code, start_date, end_date)
+                # 获取股票列表
+                query_date = analysis_date.strftime('%Y-%m-%d')
+                stock_rs = bs.query_all_stock(query_date)
+                stock_df = stock_rs.get_data()
                 
-                if not day_df.empty and len(day_df) >= 60:
-                    kline_data[code] = day_df
-                    
-            except Exception as e:
-                st.warning(f"获取 {code} 数据失败: {e}")
-            
-            progress_bar.progress((idx + 1) / len(a_stocks))
-        
-        status_text.text(f'✅ 获取完成: {len(kline_data)}只股票')
-        
-        # 高级选股分析
-        st.markdown("---")
-        st.markdown('<h2 class="sub-header">🎯 高级选股结果</h2>', unsafe_allow_html=True)
-        
-        selected_stocks = []
-        
-        with st.spinner('正在执行高级选股分析...'):
-            for symbol, df in tqdm(kline_data.items()):
-                result = advanced_stock_selection(symbol, df)
-                if result:
-                    selected_stocks.append(result)
-        
-        # 按总分排序
-        selected_stocks.sort(key=lambda x: x['综合分'], reverse=True)
-        
-        # 显示统计信息
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("📊 分析股票数", len(kline_data))
-        with col2:
-            st.metric("🎯 选中股票数", len(selected_stocks))
-        with col3:
-            if selected_stocks:
-                avg_score = np.mean([s['综合分'] for s in selected_stocks])
-                st.metric("⭐ 平均综合分", f"{avg_score:.3f}")
-        with col4:
-            if selected_stocks:
-                best_score = max([s['综合分'] for s in selected_stocks])
-                st.metric("🏆 最高综合分", f"{best_score:.3f}")
-        
-        # 显示结果表格
-        if selected_stocks:
-            df_results = pd.DataFrame(selected_stocks)
-            
-            # 格式化显示
-            df_display = df_results[[
-                '代码', '名称', '现价', '止损', '目标', '信号类型', 
-                '综合分', '技术分', '量能分', '风报比', '趋势'
-            ]].copy()
-            
-            # 添加颜色样式
-            def color_score(val):
-                if val >= 0.8:
-                    return 'background-color: #4CAF50; color: white'
-                elif val >= 0.6:
-                    return 'background-color: #2196F3; color: white'
-                elif val >= 0.4:
-                    return 'background-color: #FF9800; color: white'
-                else:
-                    return 'background-color: #F44336; color: white'
-            
-            def color_signal(val):
-                if 'buy' in str(val):
-                    return 'color: #4CAF50; font-weight: bold'
-                elif 'sell' in str(val):
-                    return 'color: #F44336; font-weight: bold'
-                return ''
-            
-            styled_df = df_display.style.applymap(color_score, subset=['综合分'])
-            styled_df = styled_df.applymap(color_signal, subset=['信号类型'])
-            
-            st.dataframe(
-                styled_df,
-                use_container_width=True,
-                height=400
-            )
-            
-            # 详细图表
-            if show_charts and len(selected_stocks) > 0:
-                st.markdown("---")
-                st.markdown('<h2 class="sub-header">📈 详细分析</h2>', unsafe_allow_html=True)
+                if stock_df.empty:
+                    st.warning("未获取到股票列表数据")
+                    return
                 
-                # 股票选择下拉框
-                selected_code = st.selectbox(
-                    "选择股票查看详细分析",
-                    options=[f"{s['代码']} - {s['名称']}" for s in selected_stocks]
-                )
+                # 过滤股票
+                a_stocks = stock_df[stock_df['code'].str.contains('sh.6|sz.0|sz.3')].head(max_stocks)
                 
-                if selected_code:
-                    code = selected_code.split(' - ')[0]
-                    stock_info = next(s for s in selected_stocks if s['代码'] == code)
+                # 进度条
+                progress_bar = st.progress(0, text="获取K线数据...")
+                
+                # 获取K线数据
+                end_date = analysis_date.strftime('%Y-%m-%d')
+                start_date = (analysis_date - timedelta(days=200)).strftime('%Y-%m-%d')
+                
+                kline_data = {}
+                for idx, stock in enumerate(a_stocks.iterrows()):
+                    _, stock = stock
+                    code = stock['code']
                     
-                    # 显示详细信息
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.markdown(f"**代码**: {code}")
-                        st.markdown(f"**名称**: {stock_info['名称']}")
-                        st.markdown(f"**现价**: {stock_info['现价']}")
-                    with col2:
-                        st.markdown(f"**止损**: {stock_info['止损']}")
-                        st.markdown(f"**目标**: {stock_info['目标']}")
-                        st.markdown(f"**风报比**: 1:{stock_info['风报比']}")
-                    with col3:
-                        st.markdown(f"**信号**: {stock_info['信号类型']}")
-                        st.markdown(f"**趋势**: {stock_info['趋势']}")
-                        st.markdown(f"**综合分**: {stock_info['综合分']}")
-                    
-                    # 雷达图
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatterpolar(
-                        r=[stock_info['技术分'], stock_info['量能分'], 
-                           stock_info['动量分'], stock_info['波动分']],
-                        theta=['技术面', '量能', '动量', '波动率'],
-                        fill='toself',
-                        name='因子评分'
-                    ))
-                    fig.update_layout(
-                        polar=dict(
-                            radialaxis=dict(
-                                visible=True,
-                                range=[0, 1]
-                            )),
-                        showlegend=False,
-                        title="多因子评分雷达图",
-                        height=400
+                    rs = bs.query_history_k_data_plus(
+                        code,
+                        'date,code,open,high,low,close,volume,amount',
+                        start_date=start_date,
+                        end_date=end_date,
+                        frequency='d'
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    day_df = rs.get_data()
                     
-                    # K线图
-                    if code in kline_data:
-                        fig_kline = plot_stock_chart(code, kline_data[code], stock_info)
-                        st.plotly_chart(fig_kline, use_container_width=True)
-            
-            # 回测示例
-            if show_backtest and len(selected_stocks) > 0:
+                    if not day_df.empty and len(day_df) >= 60:
+                        kline_data[code] = day_df
+                    
+                    progress_bar.progress((idx + 1) / len(a_stocks), text=f"数据获取: {idx+1}/{len(a_stocks)}")
+                
+                # 高级选股分析
+                progress_bar.progress(0, text="执行选股分析...")
+                selected_stocks = []
+                
+                for idx, (symbol, df) in enumerate(kline_data.items()):
+                    result = advanced_stock_selection(symbol, df)
+                    if result:
+                        # 信号类型过滤
+                        signal_type = result['信号类型']
+                        if (signal_type == '2_buy' and include_2buy) or (signal_type == '3_buy' and include_3buy):
+                            selected_stocks.append(result)
+                    
+                    progress_bar.progress((idx + 1) / len(kline_data), text=f"选股分析: {idx+1}/{len(kline_data)}")
+                
+                progress_bar.empty()
+                
+                # 按综合评分排序
+                selected_stocks.sort(key=lambda x: x['综合评分'], reverse=True)
+                
+                # 显示结果
                 st.markdown("---")
-                st.markdown('<h2 class="sub-header">📊 回测示例</h2>', unsafe_allow_html=True)
                 
-                # 模拟回测
-                backtest_data = []
-                for stock in selected_stocks[:5]:
-                    backtest_data.append({
-                        '代码': stock['代码'],
-                        '名称': stock['名称'],
-                        '模拟收益': f"{np.random.uniform(5, 30):.1f}%",
-                        '胜率': f"{np.random.uniform(50, 80):.1f}%",
-                        '最大回撤': f"{np.random.uniform(5, 15):.1f}%",
-                        '盈亏比': f"{np.random.uniform(1.5, 3.5):.2f}"
-                    })
+                if selected_stocks:
+                    # 统计信息
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("符合条件的股票", len(selected_stocks))
+                    with col2:
+                        buy2_count = len([s for s in selected_stocks if s['信号类型'] == '2_buy'])
+                        st.metric("二买信号", buy2_count)
+                    with col3:
+                        buy3_count = len([s for s in selected_stocks if s['信号类型'] == '3_buy'])
+                        st.metric("三买信号", buy3_count)
+                    with col4:
+                        avg_score = np.mean([s['综合评分'] for s in selected_stocks])
+                        st.metric("平均评分", f"{avg_score:.3f}")
+                    
+                    st.markdown("---")
+                    
+                    # 转换为DataFrame
+                    df_results = pd.DataFrame(selected_stocks)
+                    
+                    # 格式化显示
+                    df_results['综合评分'] = df_results['综合评分'].apply(lambda x: f"{x:.3f}")
+                    df_results['技术面'] = df_results['技术面'].apply(lambda x: f"{x:.3f}")
+                    df_results['量能'] = df_results['量能'].apply(lambda x: f"{x:.3f}")
+                    df_results['动量'] = df_results['动量'].apply(lambda x: f"{x:.3f}")
+                    df_results['波动率'] = df_results['波动率'].apply(lambda x: f"{x:.3f}")
+                    
+                    # 添加颜色标记
+                    def color_signal(val):
+                        if val == '2_buy':
+                            return 'background-color: #90EE90'  # 浅绿色
+                        elif val == '3_buy':
+                            return 'background-color: #87CEEB'  # 浅蓝色
+                        return ''
+                    
+                    def color_trend(val):
+                        if val == 'up':
+                            return 'color: red'
+                        elif val == 'down':
+                            return 'color: green'
+                        return ''
+                    
+                    # 显示表格
+                    st.subheader(f"📋 选股结果 ({len(selected_stocks)}只)")
+                    
+                    styled_df = df_results.style.applymap(color_signal, subset=['信号类型'])\
+                                                   .applymap(color_trend, subset=['趋势'])
+                    
+                    st.dataframe(
+                        styled_df,
+                        use_container_width=True,
+                        height=600
+                    )
+                    
+                    # 下载按钮
+                    csv = df_results.to_csv(index=False, encoding='utf-8-sig')
+                    st.download_button(
+                        label="📥 下载选股结果",
+                        data=csv,
+                        file_name=f"cchan_selection_{analysis_date.strftime('%Y%m%d')}.csv",
+                        mime="text/csv"
+                    )
+                    
+                else:
+                    st.warning("❌ 当前市场条件下未找到符合条件的股票")
+                    
+                    # 显示参数建议
+                    st.info("💡 建议调整参数：")
+                    st.write("- 降低最低综合评分")
+                    st.write("- 扩大分析股票数量")
+                    st.write("- 检查市场整体状况")
                 
-                df_backtest = pd.DataFrame(backtest_data)
-                st.dataframe(df_backtest, use_container_width=True)
+            finally:
+                bs.logout()
+    
+    else:
+        # 初始界面说明
+        st.info("👈 请在左侧配置选股参数，然后点击「开始选股」")
         
-        else:
-            st.warning('❌ 当前市场条件下未找到符合条件的股票')
-            st.info('建议调整选股参数或扩大分析范围')
+        st.markdown("""
+        ### 🎯 系统特点
         
-        # 保存结果按钮
-        if selected_stocks:
-            if st.button("💾 保存分析结果"):
-                output_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
-                                          'cchan_advanced_results.json')
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    json.dump(selected_stocks, f, ensure_ascii=False, indent=2)
-                st.success(f"✅ 结果已保存至: {output_file}")
+        - **精准缠论算法**：自动识别线段和中枢，生成买卖信号
+        - **多因子融合**：技术面、量能、动量、波动率综合评分
+        - **智能风控**：自动计算止损位和目标位
+        - **实时分析**：支持选择任意交易日进行分析
         
-    except Exception as e:
-        st.error(f"程序执行出错: {e}")
-        st.exception(e)
+        ### 📊 信号说明
         
-    finally:
-        bs.logout()
-        st.sidebar.success("BaoStock已断开")
+        - **二买**：突破中枢上沿，强势上涨信号
+        - **三买**：回踩中枢后再次向上，稳健入场信号
+        
+        ### ⚡ 使用说明
+        
+        1. 在左侧选择分析日期
+        2. 调整选股参数（可选）
+        3. 点击「开始选股」执行分析
+        4. 查看并下载选股结果
+        """)
+
 
 if __name__ == '__main__':
     main()
