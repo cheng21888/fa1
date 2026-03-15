@@ -23,30 +23,6 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ============================================================================
-# 强制禁用Altair - 防止Streamlit内部导入
-# ============================================================================
-import sys
-import types
-
-# 创建一个假的altair模块
-class MockAltair:
-    def __getattr__(self, name):
-        return None
-
-# 创建假的vegalite模块
-class MockVegaLite:
-    v4 = MockAltair()
-
-# 创建假的vega模块
-class MockVega:
-    vegalite = MockVegaLite()
-
-# 注入假的模块
-sys.modules['altair'] = MockAltair()
-sys.modules['altair.vegalite'] = MockVega()
-sys.modules['altair.vegalite.v4'] = MockAltair()
-
-# ============================================================================
 # 页面配置
 # ============================================================================
 st.set_page_config(
@@ -86,9 +62,6 @@ st.markdown("""
     }
     .info-text {
         color: #2196F3;
-        font-size: 0.9rem;
-    }
-    .stDataFrame {
         font-size: 0.9rem;
     }
 </style>
@@ -740,19 +713,14 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
         subplot_titles=(f'{symbol} - {stock_info.get("名称", "")} K线图', '成交量', 'RSI')
     )
     
-    # 转换数据类型
-    df_plot = df.copy()
-    for col in ['open', 'high', 'low', 'close', 'volume']:
-        df_plot[col] = pd.to_numeric(df_plot[col], errors='coerce')
-    
     # K线图
     fig.add_trace(
         go.Candlestick(
-            x=df_plot['date'],
-            open=df_plot['open'],
-            high=df_plot['high'],
-            low=df_plot['low'],
-            close=df_plot['close'],
+            x=df['date'],
+            open=df['open'],
+            high=df['high'],
+            low=df['low'],
+            close=df['close'],
             name='K线'
         ),
         row=1, col=1
@@ -760,12 +728,11 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
     
     # 添加均线
     for period in [5, 10, 20]:
-        if f'ma{period}' in df_plot.columns:
-            df_plot[f'ma{period}'] = pd.to_numeric(df_plot[f'ma{period}'], errors='coerce')
+        if f'ma{period}' in df.columns:
             fig.add_trace(
                 go.Scatter(
-                    x=df_plot['date'],
-                    y=df_plot[f'ma{period}'],
+                    x=df['date'],
+                    y=df[f'ma{period}'],
                     name=f'MA{period}',
                     line=dict(width=1)
                 ),
@@ -774,11 +741,11 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
     
     # 成交量图
     colors = ['red' if close >= open else 'green' 
-              for close, open in zip(df_plot['close'], df_plot['open'])]
+              for close, open in zip(df['close'], df['open'])]
     fig.add_trace(
         go.Bar(
-            x=df_plot['date'],
-            y=df_plot['volume'],
+            x=df['date'],
+            y=df['volume'],
             name='成交量',
             marker_color=colors
         ),
@@ -786,12 +753,11 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
     )
     
     # RSI
-    if 'rsi' in df_plot.columns:
-        df_plot['rsi'] = pd.to_numeric(df_plot['rsi'], errors='coerce')
+    if 'rsi' in df.columns:
         fig.add_trace(
             go.Scatter(
-                x=df_plot['date'],
-                y=df_plot['rsi'],
+                x=df['date'],
+                y=df['rsi'],
                 name='RSI',
                 line=dict(color='purple', width=1)
             ),
@@ -810,59 +776,9 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, stock_info: Dict):
         showlegend=True
     )
     
-    fig.update_xaxes(rangeslider_visible=False)
+    fig.update_xatches(rangeslider_visible=False)
     
     return fig
-
-def plot_radar_chart(scores: Dict):
-    """绘制雷达图"""
-    categories = ['技术面', '量能', '动量', '波动率']
-    
-    fig = go.Figure()
-    
-    fig.add_trace(go.Scatterpolar(
-        r=[scores['技术分'], scores['量能分'], scores['动量分'], scores['波动分']],
-        theta=categories,
-        fill='toself',
-        name='因子评分',
-        line_color='#1E88E5'
-    ))
-    
-    fig.update_layout(
-        polar=dict(
-            radialaxis=dict(
-                visible=True,
-                range=[0, 1]
-            )),
-        showlegend=False,
-        title="多因子评分雷达图",
-        height=400
-    )
-    
-    return fig
-
-# ============================================================================
-# 表格显示函数
-# ============================================================================
-
-def display_results_table(df_results):
-    """显示结果表格"""
-    # 选择要显示的列
-    display_cols = ['代码', '名称', '现价', '止损', '目标', '信号类型', '综合分', '技术分', '量能分', '风报比', '趋势']
-    df_display = df_results[display_cols].copy()
-    
-    # 格式化数值
-    for col in ['综合分', '技术分', '量能分']:
-        df_display[col] = df_display[col].apply(lambda x: f"{x:.3f}")
-    
-    df_display['风报比'] = df_display['风报比'].apply(lambda x: f"1:{x:.2f}")
-    
-    # 使用st.dataframe直接显示
-    st.dataframe(
-        df_display,
-        use_container_width=True,
-        height=400
-    )
 
 # ============================================================================
 # 主程序
@@ -927,22 +843,8 @@ def main():
             query_date = selected_date.strftime('%Y-%m-%d')
             stock_df = get_stock_list(query_date)
         
-        if stock_df.empty:
-            st.warning(f"日期 {query_date} 无交易数据，尝试获取最近交易日数据...")
-            # 尝试获取前一天的日期
-            for days_back in range(1, 10):
-                query_date = (selected_date - timedelta(days=days_back)).strftime('%Y-%m-%d')
-                stock_df = get_stock_list(query_date)
-                if not stock_df.empty:
-                    st.info(f"使用 {query_date} 的数据")
-                    break
-        
-        if stock_df.empty:
-            st.error("无法获取股票列表")
-            return
-        
         # 过滤股票
-        a_stocks = stock_df[stock_df['code'].str.contains('sh.6|sz.0|sz.3', na=False)]
+        a_stocks = stock_df[stock_df['code'].str.contains('sh.6|sz.0|sz.3')]
         if test_mode:
             a_stocks = a_stocks.head(max_stocks)
         
@@ -981,7 +883,7 @@ def main():
         selected_stocks = []
         
         with st.spinner('正在执行高级选股分析...'):
-            for symbol, df in kline_data.items():
+            for symbol, df in tqdm(kline_data.items()):
                 result = advanced_stock_selection(symbol, df)
                 if result:
                     selected_stocks.append(result)
@@ -1007,7 +909,39 @@ def main():
         # 显示结果表格
         if selected_stocks:
             df_results = pd.DataFrame(selected_stocks)
-            display_results_table(df_results)
+            
+            # 格式化显示
+            df_display = df_results[[
+                '代码', '名称', '现价', '止损', '目标', '信号类型', 
+                '综合分', '技术分', '量能分', '风报比', '趋势'
+            ]].copy()
+            
+            # 添加颜色样式
+            def color_score(val):
+                if val >= 0.8:
+                    return 'background-color: #4CAF50; color: white'
+                elif val >= 0.6:
+                    return 'background-color: #2196F3; color: white'
+                elif val >= 0.4:
+                    return 'background-color: #FF9800; color: white'
+                else:
+                    return 'background-color: #F44336; color: white'
+            
+            def color_signal(val):
+                if 'buy' in str(val):
+                    return 'color: #4CAF50; font-weight: bold'
+                elif 'sell' in str(val):
+                    return 'color: #F44336; font-weight: bold'
+                return ''
+            
+            styled_df = df_display.style.applymap(color_score, subset=['综合分'])
+            styled_df = styled_df.applymap(color_signal, subset=['信号类型'])
+            
+            st.dataframe(
+                styled_df,
+                use_container_width=True,
+                height=400
+            )
             
             # 详细图表
             if show_charts and len(selected_stocks) > 0:
@@ -1040,8 +974,25 @@ def main():
                         st.markdown(f"**综合分**: {stock_info['综合分']}")
                     
                     # 雷达图
-                    fig_radar = plot_radar_chart(stock_info)
-                    st.plotly_chart(fig_radar, use_container_width=True)
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatterpolar(
+                        r=[stock_info['技术分'], stock_info['量能分'], 
+                           stock_info['动量分'], stock_info['波动分']],
+                        theta=['技术面', '量能', '动量', '波动率'],
+                        fill='toself',
+                        name='因子评分'
+                    ))
+                    fig.update_layout(
+                        polar=dict(
+                            radialaxis=dict(
+                                visible=True,
+                                range=[0, 1]
+                            )),
+                        showlegend=False,
+                        title="多因子评分雷达图",
+                        height=400
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
                     
                     # K线图
                     if code in kline_data:
