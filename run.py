@@ -8,6 +8,31 @@ CChanTrader-AI Streamlit应用
 - 表格形式展示
 """
 
+import sys
+import subprocess
+
+# 检查并安装必要的包
+def install_package(package):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+# 确保安装正确版本的包
+required_packages = [
+    "streamlit==1.28.0",
+    "pandas==2.0.3",
+    "numpy==1.24.3",
+    "plotly==5.17.0",
+    "baostock==0.8.9",
+    "python-dotenv==1.0.0",
+    "altair==5.0.1",
+    "protobuf==3.20.3"
+]
+
+for package in required_packages:
+    try:
+        __import__(package.split('==')[0])
+    except ImportError:
+        install_package(package)
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -21,6 +46,7 @@ import os
 import json
 from typing import Optional, Dict, List
 from dataclasses import dataclass
+from tqdm import tqdm
 
 # ============================================================================
 # 页面配置
@@ -63,6 +89,23 @@ st.markdown("""
     .info-text {
         color: #666;
         font-size: 0.9rem;
+    }
+    .stDataFrame {
+        font-size: 0.9rem;
+    }
+    .buy-2 {
+        background-color: #00C85320;
+        padding: 2px 5px;
+        border-radius: 3px;
+        color: #00C853;
+        font-weight: bold;
+    }
+    .buy-3 {
+        background-color: #FFA00020;
+        padding: 2px 5px;
+        border-radius: 3px;
+        color: #FFA000;
+        font-weight: bold;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -574,18 +617,42 @@ class MultiFactorAnalyzer:
 # 高级选股函数
 # ============================================================================
 
+def get_stock_name(symbol: str) -> str:
+    """获取股票名称（简化版）"""
+    name_map = {
+        'sh.600000': '浦发银行',
+        'sh.600036': '招商银行',
+        'sh.600519': '贵州茅台',
+        'sh.600900': '长江电力',
+        'sh.601318': '中国平安',
+        'sh.601166': '兴业银行',
+        'sz.000001': '平安银行',
+        'sz.000858': '五粮液',
+        'sz.000333': '美的集团',
+        'sz.002415': '海康威视',
+        'sz.300750': '宁德时代',
+        'sz.300059': '东方财富',
+    }
+    # 如果不在映射表中，返回代码的后6位
+    return name_map.get(symbol, symbol.split('.')[-1])
+
 def advanced_stock_selection(symbol: str, df: pd.DataFrame) -> Optional[Dict]:
     """高级选股函数"""
     try:
         if len(df) < 60 or df['volume'].sum() == 0:
             return None
         
+        # 转换数据类型
+        for col in ['close', 'volume', 'amount']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
         current_price = float(df['close'].iloc[-1])
         price_range = ADVANCED_PARAMS["selection"]["price_range"]
         if not (price_range[0] <= current_price <= price_range[1]):
             return None
         
-        avg_amount = df['amount'].iloc[-20:].mean() if 'amount' in df.columns else 0
+        avg_amount = pd.to_numeric(df['amount'].iloc[-20:], errors='coerce').mean() if 'amount' in df.columns else 0
         if avg_amount < ADVANCED_PARAMS["selection"]["min_liquidity"]:
             return None
         
@@ -618,42 +685,32 @@ def advanced_stock_selection(symbol: str, df: pd.DataFrame) -> Optional[Dict]:
         
         signal_type = '2_buy' if chan_result['signals']['2_buy'] else '3_buy'
         
+        # 获取股票名称
+        stock_name = get_stock_name(symbol)
+        
         return {
             '股票代码': symbol,
-            '股票名称': get_stock_name(symbol),
-            '入场价格': round(entry_price, 2),
-            '止损价格': round(stop_loss, 2),
-            '目标价格': round(take_profit, 2),
-            '信号类型': signal_type,
+            '股票名称': stock_name,
+            '最新价': round(current_price, 2),
+            '信号类型': '二买' if signal_type == '2_buy' else '三买',
+            '综合得分': factor_score.total_score,
             '技术面得分': factor_score.technical_score,
             '量能得分': factor_score.volume_score,
             '动量得分': factor_score.momentum_score,
             '波动率得分': factor_score.volatility_score,
-            '综合得分': factor_score.total_score,
-            '风险评分': factor_score.risk_score,
+            '入场价格': round(entry_price, 2),
+            '止损价格': round(stop_loss, 2),
+            '目标价格': round(take_profit, 2),
+            '风险回报比': round((take_profit - entry_price) / (entry_price - stop_loss), 2),
             '趋势': chan_result['trend'],
             '线段数': len(chan_result['segments']),
             '中枢数': len(chan_result['pivots']),
-            '风险回报比': round((take_profit - entry_price) / (entry_price - stop_loss), 2),
-            '最新价': round(current_price, 2),
             '分析时间': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
     except Exception as e:
         print(f"高级选股分析 {symbol} 错误: {e}")
         return None
-
-def get_stock_name(symbol: str) -> str:
-    """获取股票名称（简化版）"""
-    name_map = {
-        'sh.600000': '浦发银行',
-        'sh.600036': '招商银行',
-        'sh.600519': '贵州茅台',
-        'sz.000001': '平安银行',
-        'sz.000858': '五粮液',
-        'sz.300750': '宁德时代',
-    }
-    return name_map.get(symbol, symbol.split('.')[-1])
 
 # ============================================================================
 # 数据获取函数
@@ -666,7 +723,8 @@ def get_stock_list(date: str) -> pd.DataFrame:
         stock_rs = bs.query_all_stock(date)
         stock_df = stock_rs.get_data()
         return stock_df
-    except:
+    except Exception as e:
+        print(f"获取股票列表错误: {e}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
@@ -682,7 +740,8 @@ def get_kline_data(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
         )
         df = rs.get_data()
         return df
-    except:
+    except Exception as e:
+        print(f"获取K线数据错误 {symbol}: {e}")
         return pd.DataFrame()
 
 # ============================================================================
@@ -699,14 +758,17 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, analysis_result: Dict):
         subplot_titles=(f'{symbol} - K线图', '成交量', 'RSI')
     )
     
+    # 转换日期格式
+    df['date'] = pd.to_datetime(df['date'])
+    
     # K线图
     fig.add_trace(
         go.Candlestick(
             x=df['date'],
-            open=df['open'],
-            high=df['high'],
-            low=df['low'],
-            close=df['close'],
+            open=pd.to_numeric(df['open']),
+            high=pd.to_numeric(df['high']),
+            low=pd.to_numeric(df['low']),
+            close=pd.to_numeric(df['close']),
             name='K线'
         ),
         row=1, col=1
@@ -718,7 +780,7 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, analysis_result: Dict):
             fig.add_trace(
                 go.Scatter(
                     x=df['date'],
-                    y=df[f'ma{period}'],
+                    y=pd.to_numeric(df[f'ma{period}']),
                     name=f'MA{period}',
                     line=dict(width=1)
                 ),
@@ -726,12 +788,15 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, analysis_result: Dict):
             )
     
     # 成交量
-    colors = ['red' if df['close'].iloc[i] >= df['open'].iloc[i] else 'green' 
+    close_prices = pd.to_numeric(df['close'])
+    open_prices = pd.to_numeric(df['open'])
+    colors = ['red' if close_prices.iloc[i] >= open_prices.iloc[i] else 'green' 
               for i in range(len(df))]
+    
     fig.add_trace(
         go.Bar(
             x=df['date'],
-            y=df['volume'],
+            y=pd.to_numeric(df['volume']),
             name='成交量',
             marker_color=colors
         ),
@@ -743,7 +808,7 @@ def plot_stock_chart(symbol: str, df: pd.DataFrame, analysis_result: Dict):
         fig.add_trace(
             go.Scatter(
                 x=df['date'],
-                y=df['rsi'],
+                y=pd.to_numeric(df['rsi']),
                 name='RSI',
                 line=dict(color='purple', width=1)
             ),
@@ -826,6 +891,9 @@ def main():
             step=10
         )
         
+        # 更新全局参数
+        ADVANCED_PARAMS["selection"]["min_score"] = min_score
+        
         # 分析按钮
         st.markdown("---")
         analyze_button = st.button("🚀 开始分析", type="primary", use_container_width=True)
@@ -869,11 +937,11 @@ def main():
                 # 过滤股票
                 conditions = []
                 if "上证A股" in market_type:
-                    conditions.append(stock_df['code'].str.contains('sh.6'))
+                    conditions.append(stock_df['code'].str.contains('sh.6', na=False))
                 if "深证A股" in market_type:
-                    conditions.append(stock_df['code'].str.contains('sz.0'))
+                    conditions.append(stock_df['code'].str.contains('sz.0', na=False))
                 if "创业板" in market_type:
-                    conditions.append(stock_df['code'].str.contains('sz.3'))
+                    conditions.append(stock_df['code'].str.contains('sz.3', na=False))
                 
                 if conditions:
                     mask = conditions[0]
@@ -909,7 +977,7 @@ def main():
                 st.markdown('<h2 class="sub-header">📊 选股分析结果</h2>', unsafe_allow_html=True)
                 
                 results = []
-                for symbol, df in tqdm(kline_data.items()):
+                for symbol, df in kline_data.items():
                     result = advanced_stock_selection(symbol, df)
                     if result:
                         results.append(result)
@@ -932,7 +1000,7 @@ def main():
                         avg_rr = df_results['风险回报比'].mean()
                         st.metric("平均风险回报比", f"1:{avg_rr:.2f}")
                     with col4:
-                        buy_signals = len(df_results[df_results['信号类型'] == '2_buy'])
+                        buy_signals = len(df_results[df_results['信号类型'] == '二买'])
                         st.metric("二买信号数量", buy_signals)
                     
                     # 显示表格
@@ -941,27 +1009,6 @@ def main():
                     # 格式化显示
                     display_df = df_results.copy()
                     
-                    # 添加颜色标记
-                    def color_signal(val):
-                        color = 'green' if val == '2_buy' else 'orange' if val == '3_buy' else 'black'
-                        return f'color: {color}'
-                    
-                    def color_score(val):
-                        if val >= 0.8:
-                            color = 'green'
-                        elif val >= 0.6:
-                            color = 'orange'
-                        else:
-                            color = 'red'
-                        return f'color: {color}'
-                    
-                    # 应用样式
-                    styled_df = display_df.style.applymap(
-                        color_signal, subset=['信号类型']
-                    ).applymap(
-                        color_score, subset=['综合得分']
-                    )
-                    
                     # 选择显示的列
                     columns_to_show = [
                         '股票代码', '股票名称', '最新价', '信号类型', '综合得分',
@@ -969,10 +1016,28 @@ def main():
                         '止损价格', '目标价格', '风险回报比', '趋势'
                     ]
                     
+                    # 使用st.dataframe显示
                     st.dataframe(
                         display_df[columns_to_show],
                         use_container_width=True,
-                        height=400
+                        height=400,
+                        column_config={
+                            "综合得分": st.column_config.ProgressColumn(
+                                "综合得分",
+                                help="综合评分",
+                                format="%.3f",
+                                min_value=0,
+                                max_value=1,
+                            ),
+                            "技术面得分": st.column_config.NumberColumn("技术面", format="%.3f"),
+                            "量能得分": st.column_config.NumberColumn("量能", format="%.3f"),
+                            "动量得分": st.column_config.NumberColumn("动量", format="%.3f"),
+                            "入场价格": st.column_config.NumberColumn("入场", format="¥%.2f"),
+                            "止损价格": st.column_config.NumberColumn("止损", format="¥%.2f"),
+                            "目标价格": st.column_config.NumberColumn("目标", format="¥%.2f"),
+                            "最新价": st.column_config.NumberColumn("最新", format="¥%.2f"),
+                            "风险回报比": st.column_config.NumberColumn("风险比", format="1:%.2f"),
+                        }
                     )
                     
                     # 下载按钮
@@ -1014,11 +1079,18 @@ def main():
                             st.write(f"**风险回报比**: 1:{stock_detail['风险回报比']}")
                             
                             st.markdown("#### 多因子评分")
+                            
+                            # 使用进度条显示评分
                             st.write(f"**技术面得分**: {stock_detail['技术面得分']}")
+                            st.progress(stock_detail['技术面得分'])
                             st.write(f"**量能得分**: {stock_detail['量能得分']}")
+                            st.progress(stock_detail['量能得分'])
                             st.write(f"**动量得分**: {stock_detail['动量得分']}")
+                            st.progress(stock_detail['动量得分'])
                             st.write(f"**波动率得分**: {stock_detail['波动率得分']}")
+                            st.progress(stock_detail['波动率得分'])
                             st.write(f"**综合得分**: {stock_detail['综合得分']}")
+                            st.progress(stock_detail['综合得分'])
                         
                         with col2:
                             # 绘制图表
@@ -1035,7 +1107,9 @@ def main():
                     output_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
                                              f'cchan_results_{analysis_date.strftime("%Y%m%d")}.json')
                     with open(output_file, 'w', encoding='utf-8') as f:
-                        json.dump(results, f, ensure_ascii=False, indent=2)
+                        # 转换DataFrame为可序列化的格式
+                        json_results = df_results.to_dict('records')
+                        json.dump(json_results, f, ensure_ascii=False, indent=2)
                     
                     st.success(f"✅ 分析完成！结果已保存至: {output_file}")
                     
