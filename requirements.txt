@@ -1,6 +1,7 @@
 streamlit
 baostock
-akshar
+akshare
+numpy
 pandas
 tqdm
 
