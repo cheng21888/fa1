@@ -4,5 +4,6 @@ akshare
 numpy
 pandas
 tqdm
+plotly
 
 
